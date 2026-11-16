@@ -119,3 +119,15 @@ def test_vaultdrop_api_quotas_shares_and_audit_logs(tmp_path: Path) -> None:
             conn.commit()
         exp_dl = tc.post(f"/api/share/{s2['token']}/download")
         assert exp_dl.status_code == 410
+
+        # Share link revocation
+        s3 = tc.post(f"/api/files/{fid2}/share", headers=admin_hdr, json={"ttl_minutes": 10}).json()
+        assert tc.post(f"/api/share/{s3['token']}/revoke", headers=admin_hdr).status_code == 200
+        assert tc.post(f"/api/share/{s3['token']}/download").status_code == 404
+
+        # Admin user list & quota update
+        users = tc.get("/api/admin/users", headers=admin_hdr).json()["users"]
+        assert len(users) == 1
+        upd = tc.patch(f"/api/admin/users/{users[0]['id']}/quota", headers=admin_hdr, json={"quota_bytes": 16384})
+        assert upd.status_code == 200
+        assert upd.json()["quota_bytes"] == 16384

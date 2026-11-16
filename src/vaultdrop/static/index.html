@@ -5,10 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>VaultDrop — Encrypted File Sharing</title>
   <style>
-    body { font-family: system-ui, sans-serif; background: #0d1117; color: #e6edf3; max-width: 900px; margin: 32px auto; padding: 0 16px; }
+    body { font-family: system-ui, sans-serif; background: #0d1117; color: #e6edf3; max-width: 960px; margin: 32px auto; padding: 0 16px; }
     .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 18px; margin-bottom: 16px; }
     input, button { padding: 8px 12px; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #e6edf3; }
     button { background: #2f81f7; border: none; cursor: pointer; font-weight: 600; }
+    button.btn-danger { background: #da3633; }
+    button.btn-ghost { background: #21262d; border: 1px solid #30363d; }
     table { width: 100%; border-collapse: collapse; margin-top: 10px; }
     th, td { border-bottom: 1px solid #30363d; padding: 8px; text-align: left; font-size: 0.9rem; }
     .hidden { display: none; }
@@ -22,19 +24,30 @@
     <input id="user" placeholder="Username" />
     <input id="pass" type="password" placeholder="Password (min 8 chars)" />
     <button onclick="auth('/api/auth/login')">Sign In</button>
-    <button onclick="auth('/api/auth/register')">Register</button>
+    <button class="btn-ghost" onclick="auth('/api/auth/register')">Register</button>
     <div id="auth-msg" class="muted"></div>
   </div>
 
   <div id="vault-box" class="hidden">
     <div class="card">
-      <div id="quota-info" class="muted"></div>
-      <input id="file-input" type="file" />
-      <button onclick="uploadFile()">Encrypt &amp; Upload</button>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div id="quota-info" class="muted"></div>
+        <button class="btn-ghost" onclick="logout()">Sign Out</button>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input id="file-input" type="file" />
+        <button onclick="uploadFile()">Encrypt &amp; Upload</button>
+      </div>
     </div>
     <div class="card">
       <h3>Your Encrypted Files</h3>
       <table><thead><tr><th>Name</th><th>Size</th><th>SHA-256</th><th>Actions</th></tr></thead><tbody id="files"></tbody></table>
+    </div>
+    <div id="admin-panel" class="card hidden">
+      <h3>Admin Panel — Users &amp; Download Audit Logs</h3>
+      <table><thead><tr><th>User</th><th>Role</th><th>Used / Quota</th><th>Action</th></tr></thead><tbody id="admin-users"></tbody></table>
+      <h4 style="margin-top:16px;">Recent Downloads</h4>
+      <table><thead><tr><th>File</th><th>Actor / Token</th><th>IP</th><th>Time</th></tr></thead><tbody id="admin-logs"></tbody></table>
     </div>
   </div>
   <script>
@@ -46,6 +59,7 @@
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || 'Error');
       return r.json();
     }
+    function logout() { localStorage.removeItem('vd_token'); location.reload(); }
     async function auth(ep) {
       try {
         const res = await api(ep, {
@@ -69,9 +83,33 @@
       for (const f of files) {
         const tr = document.createElement('tr');
         tr.innerHTML = `<td>${f.original_name}</td><td>${f.size_bytes} B</td><td><code>${f.sha256_hex.slice(0,12)}...</code></td>
-          <td><button onclick="shareFile('${f.id}')">Create Share Link</button></td>`;
+          <td>
+            <button onclick="shareFile('${f.id}')">Share</button>
+            <button class="btn-danger" onclick="deleteFile('${f.id}')">Delete</button>
+          </td>`;
         tb.appendChild(tr);
       }
+      if (me.role === 'admin') {
+        document.getElementById('admin-panel').classList.remove('hidden');
+        await loadAdmin();
+      }
+    }
+    async function loadAdmin() {
+      const { users } = await api('/api/admin/users');
+      document.getElementById('admin-users').innerHTML = users.map(u => `
+        <tr><td>${u.username}</td><td>${u.role}</td><td>${u.used_bytes} / ${u.quota_bytes} B</td>
+        <td><button class="btn-ghost" onclick="setQuota('${u.id}')">Update Quota</button></td></tr>`).join('');
+      const { logs } = await api('/api/admin/logs');
+      document.getElementById('admin-logs').innerHTML = logs.map(l => `
+        <tr><td>${l.original_name}</td><td>${l.share_token || l.actor_user_id || '-'}</td><td>${l.client_ip}</td><td>${l.downloaded_at}</td></tr>`).join('');
+    }
+    async function setQuota(id) {
+      const q = prompt('New quota in bytes:');
+      if (!q) return;
+      await api(`/api/admin/users/${id}/quota`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ quota_bytes: parseInt(q, 10) })
+      });
+      await loadVault();
     }
     async function uploadFile() {
       const f = document.getElementById('file-input').files[0];
@@ -81,11 +119,16 @@
       await api('/api/files', { method: 'POST', body: form });
       await loadVault();
     }
+    async function deleteFile(id) {
+      await api(`/api/files/${id}`, { method: 'DELETE' });
+      await loadVault();
+    }
     async function shareFile(id) {
+      const passcode = prompt('Optional passcode (leave empty for none):') || null;
       const res = await api(`/api/files/${id}/share`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ttl_minutes: 60, max_downloads: 5 })
+        body: JSON.stringify({ ttl_minutes: 60, max_downloads: 5, passcode })
       });
       alert('Share token: ' + res.token);
     }
