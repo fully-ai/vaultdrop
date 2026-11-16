@@ -1,0 +1,17 @@
+services:
+  vaultdrop:
+    build: .
+    ports:
+      - "8090:8090"
+    environment:
+      VAULTDROP_HOST: "0.0.0.0"
+      VAULTDROP_PORT: "8090"
+      VAULTDROP_DATA_DIR: "/data"
+      VAULTDROP_MASTER_KEY_HEX: "${VAULTDROP_MASTER_KEY_HEX:-}"
+      VAULTDROP_JWT_SECRET: "${VAULTDROP_JWT_SECRET:-}"
+    volumes:
+      - vaultdrop_data:/data
+    restart: unless-stopped
+
+volumes:
+  vaultdrop_data:
